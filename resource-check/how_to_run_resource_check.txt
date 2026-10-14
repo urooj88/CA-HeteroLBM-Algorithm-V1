@@ -1,0 +1,191 @@
+Resource Check Guide
+====================
+
+This folder is separate from the LBM application code. It contains an external monitoring wrapper that can run the LBM application and collect CPU, cache, memory, NUMA, GPU, PCIe, and runtime information while the application is running.
+
+Folder
+------
+
+Main folder:
+
+  /home/urooj/urooj-work-heterogeneous-v3-optimzed/resource-check
+
+Main script:
+
+  resouce-chek
+
+Physical power meter:
+
+  The script also tries to use the Adcewatt physical power meter at:
+
+    /home/urooj/Adcewatts-stool/wattmetre-readmv2new
+
+  It calculates total power using:
+
+    Total power = #activepow8 + #activepow9
+
+Results folder created by the script:
+
+  resource_results/<timestamp>_<run_name>
+
+Important
+---------
+
+The script does not change the LBM source code. The script only wraps the command that you provide. Each run is saved in a separate timestamped result directory.
+
+Before First Use
+----------------
+
+Go to the resource-check folder:
+
+  cd /home/urooj/urooj-work-heterogeneous-v3-optimzed/resource-check
+
+Make the script executable if needed:
+
+  chmod +x resouce-chek
+
+Basic Command Format
+--------------------
+
+  ./resouce-chek --name RUN_NAME -- COMMAND_TO_RUN
+
+Example Normal Heterogeneous Run
+--------------------------------
+
+  cd /home/urooj/urooj-work-heterogeneous-v3-optimzed/culbibbs/home
+
+  ../../resource-check/resouce-chek \
+    --name hetero_100_normal \
+    -- ./bin/run_lbm_baseline.py --mode hetero --size 100 --hetero-layout gpu-gpu-cpu --gpus 0,1
+
+Example Optimized Heterogeneous 100 Run
+---------------------------------------
+
+Use this command to run the optimized heterogeneous CPU+GPU version for size 100^3 with resource monitoring:
+
+  cd /home/urooj/urooj-work-heterogeneous-v3-optimzed/culbibbs/home
+
+  ../../resource-check/resouce-chek \
+    --baseline-power-watts 287.58 \
+    --name optimized_hetero_100 \
+    -- ./bin/run_lbm_baseline.py \
+      --mode hetero \
+      --size 100 \
+      --hetero-layout gpu-gpu-cpu \
+      --gpus 0,1
+
+Example Single GPU Run
+----------------------
+
+  cd /home/urooj/urooj-work-heterogeneous-v3-optimzed/culbibbs/home
+
+  ../../resource-check/resouce-chek \
+    --baseline-power-watts 287.58 \
+    --name single_gpu_100 \
+    -- ./bin/run_lbm_baseline.py --mode single-gpu --size 100 --gpus 0
+
+Example Multi GPU Run
+---------------------
+
+  cd /home/urooj/urooj-work-heterogeneous-v3-optimzed/culbibbs/home
+
+  ../../resource-check/resouce-chek \
+    --baseline-power-watts 287.58 \
+    --name multi_gpu_100 \
+    -- ./bin/run_lbm_baseline.py --mode multi-gpu --size 100 --gpus 0,1
+
+Controlled NUMA Experiments
+---------------------------
+
+These commands are useful for single-GPU NUMA placement tests.
+
+GPU0 local NUMA placement:
+
+  ../../resource-check/resouce-chek \
+    --name gpu0_local_100 \
+    -- bash -lc 'CUDA_VISIBLE_DEVICES=0 numactl --cpunodebind=0 --membind=0 ./bin/run_lbm_baseline.py --mode single-gpu --size 100 --gpus 0'
+
+GPU0 remote NUMA placement:
+
+  ../../resource-check/resouce-chek \
+    --name gpu0_remote_100 \
+    -- bash -lc 'CUDA_VISIBLE_DEVICES=0 numactl --cpunodebind=1 --membind=1 ./bin/run_lbm_baseline.py --mode single-gpu --size 100 --gpus 0'
+
+GPU1 local NUMA placement:
+
+  ../../resource-check/resouce-chek \
+    --name gpu1_local_100 \
+    -- bash -lc 'CUDA_VISIBLE_DEVICES=1 numactl --cpunodebind=1 --membind=1 ./bin/run_lbm_baseline.py --mode single-gpu --size 100 --gpus 1'
+
+GPU1 remote NUMA placement:
+
+  ../../resource-check/resouce-chek \
+    --name gpu1_remote_100 \
+    -- bash -lc 'CUDA_VISIBLE_DEVICES=1 numactl --cpunodebind=0 --membind=0 ./bin/run_lbm_baseline.py --mode single-gpu --size 100 --gpus 1'
+
+What The Script Saves
+---------------------
+
+Each run directory contains:
+
+  summary.txt
+  command.txt
+  system_info.txt
+  application_stdout.log
+  application_stderr.log
+  perf_stat.log
+  nvidia_smi_samples.csv
+  cpu_threads_samples.log
+  memory_samples.log
+  numactl_hardware.txt
+  numastat_before.txt
+  numastat_after.txt
+  pcie_before.txt
+  pcie_after.txt
+  gpu_p2p_topology.txt
+  adcewatt_power_raw.csv
+  adcewatt_power_summary.txt
+
+What The Final Summary Shows
+----------------------------
+
+The final terminal summary reports:
+
+  application command
+  execution time
+  exit status
+  CPU cycles
+  instructions
+  IPC
+  cache references
+  cache misses
+  memory sample location
+  NUMA report locations
+  GPU utilization
+  GPU memory use
+  physical total power
+  physical dynamic power if baseline is provided
+  physical total energy
+  physical dynamic energy if baseline is provided
+  PCIe generation and width
+  P2P topology file
+
+Notes
+-----
+
+Some counters depend on Linux permissions and hardware support. If perf, LLC, NUMA, or PCIe counters are not available, the script saves what it can and
+marks unsupported values as not available.
+
+If you already measured idle baseline power, pass it with:
+
+  --baseline-power-watts 287.58
+
+If you do not pass a baseline value, total power and total energy are still reported, but dynamic power and dynamic energy are marked as not available.
+
+If you want resource monitoring without the physical meter, add:
+
+  --no-adcewatt
+
+High cache misses, remote NUMA access, or high PCIe activity do not by themselves prove contention. Compare normal, local NUMA, remote NUMA, single GPU, multi GPU, and heterogeneous runs to understand the behavior.
+
+

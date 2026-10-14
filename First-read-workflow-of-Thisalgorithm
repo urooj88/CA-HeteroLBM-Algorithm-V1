@@ -1,0 +1,125 @@
+First-read workflow for CA-HeteroLBM-Algorithm
+==============================================
+
+This file explains what a new user should read first after downloading this repository.
+
+
+1. Start with the main overview
+-------------------------------
+
+Read:
+
+  README.md
+
+This file explains what CA-HeteroLBM is, what execution modes it supports, and shows quick build and run examples.
+
+
+2. Understand the execution modes
+---------------------------------
+
+Read:
+
+  docs/modes.txt
+
+This file explains the supported execution modes:
+
+  single-gpu
+  multi-gpu
+  optimized heterogeneous CPU+GPU
+  GPU-aware optimized heterogeneous CPU+GPU
+
+
+3. Learn how to build and run the solver
+----------------------------------------
+
+Read:
+
+  docs/run_instructions.txt
+
+This is the main practical instruction file. It explains:
+
+  how to build the solver
+  how to run single-GPU mode
+  how to run multi-GPU mode
+  how to run optimized heterogeneous mode
+  how to run GPU-aware optimized heterogeneous mode
+  how to run energy measurements
+  how to run with or without the AdceWatt power meter
+
+
+4. Understand the folder structure
+----------------------------------
+
+Read:
+
+  docs/folder_details.md
+
+This file explains what each folder contains, including:
+
+  src/
+  bin/
+  input/
+  cudafunc/
+  3dbase/
+  3dgeneral/
+  3dsetup/
+  results_summary/
+
+
+5. Build and run on another machine
+-----------------------------------
+
+Read:
+
+  docs/build_and_run_on_another_system.txt
+
+This file is useful when the solver is moved to a different server or HPC system. The tuned heterogeneous profiles are platform-specific, so another machine may require retuning of the CPU Z-plane count and OpenMP thread count.
+
+
+6. Energy measurement details
+-----------------------------
+
+Read:
+
+  docs/energy_measurement_notes.txt
+
+This file is useful only if the user wants to reproduce the AdceWatt energy measurement workflow. Users without the AdceWatt power meter can still run all solver modes with:
+
+  bin/run_lbm_baseline.py
+
+
+7. Main code files
+------------------
+
+To understand the code flow, read these files:
+
+  src/main_plane_couette_3D_CUDA_paramcalc_virtual_nodes_mpi_omp_cuda_1dZsv3.cu
+  bin/run_lbm_baseline.py
+  bin/run_lbm_energy_adcewatt.py
+
+The CUDA/MPI/OpenMP solver logic is in the source file. The baseline runner launches normal timing and correctness runs. The energy runner launches runs with AdceWatt energy measurement.
+
+
+Recommended reading order
+-------------------------
+
+For most users, the recommended order is:
+
+  1. README.md
+  2. docs/modes.txt
+  3. docs/run_instructions.txt
+  4. docs/folder_details.md
+
+For users who want energy measurements, also read:
+
+  docs/energy_measurement_notes.txt
+
+For users moving the code to another machine, also read:
+
+  docs/build_and_run_on_another_system.txt
+  
+  
+  
+  
+  
+  

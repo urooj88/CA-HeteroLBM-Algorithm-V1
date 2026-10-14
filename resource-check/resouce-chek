@@ -1,0 +1,526 @@
+#!/usr/bin/env bash
+set -u
+
+usage() {
+    cat <<'EOF'
+Usage:
+  ./resouce-chek --name RUN_NAME -- COMMAND
+
+Examples:
+  ./resouce-chek --name normal -- ./bin/run_lbm_baseline.py --mode hetero --size 100 --hetero-layout gpu-gpu-cpu --gpus 0,1
+
+  ./resouce-chek --name gpu0-local -- bash -lc 'CUDA_VISIBLE_DEVICES=0 numactl --cpunodebind=0 --membind=0 ./bin/run_lbm_baseline.py --mode single-gpu --size 100 --gpus 0'
+
+Options:
+  --name NAME          Label for this experiment.
+  --interval SECONDS   Sampling interval for background monitors. Default: 1.
+  --out DIR            Output root directory. Default: ./resource_results.
+  --baseline-power-watts W
+                       Idle baseline power for dynamic power/energy.
+  --no-adcewatt        Disable physical power meter measurement.
+  -h, --help           Show this help.
+
+Notes:
+  The script does not modify the application source code.
+  It runs the command you provide and saves monitoring logs in a timestamped folder.
+EOF
+}
+
+RUN_NAME="run"
+INTERVAL=1
+OUT_ROOT="./resource_results"
+BASELINE_POWER_WATTS=""
+USE_ADCEWATT=1
+WATTMETER="/home/urooj/Adcewatts-stool/wattmetre-readmv2new"
+WATTMETER_DEVICE="/dev/ttyUSB0"
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --name)
+            RUN_NAME="${2:-run}"
+            shift 2
+            ;;
+        --interval)
+            INTERVAL="${2:-1}"
+            shift 2
+            ;;
+        --out)
+            OUT_ROOT="${2:-./resource_results}"
+            shift 2
+            ;;
+        --baseline-power-watts)
+            BASELINE_POWER_WATTS="${2:-}"
+            shift 2
+            ;;
+        --no-adcewatt)
+            USE_ADCEWATT=0
+            shift
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        --)
+            shift
+            break
+            ;;
+        *)
+            echo "Unknown option: $1"
+            usage
+            exit 2
+            ;;
+    esac
+done
+
+if [[ $# -lt 1 ]]; then
+    echo "ERROR: no application command was provided."
+    usage
+    exit 2
+fi
+
+APP_CMD="$*"
+TS="$(date +%Y%m%d_%H%M%S)"
+SAFE_NAME="$(echo "$RUN_NAME" | tr -c 'A-Za-z0-9_.-' '_')"
+RUN_DIR="${OUT_ROOT}/${TS}_${SAFE_NAME}"
+mkdir -p "$RUN_DIR"
+
+APP_STDOUT="$RUN_DIR/application_stdout.log"
+APP_STDERR="$RUN_DIR/application_stderr.log"
+PERF_LOG="$RUN_DIR/perf_stat.log"
+SUMMARY="$RUN_DIR/summary.txt"
+GPU_LOG="$RUN_DIR/nvidia_smi_samples.csv"
+CPU_LOG="$RUN_DIR/cpu_threads_samples.log"
+MEM_LOG="$RUN_DIR/memory_samples.log"
+NUMA_BEFORE="$RUN_DIR/numastat_before.txt"
+NUMA_AFTER="$RUN_DIR/numastat_after.txt"
+NUMA_HW="$RUN_DIR/numactl_hardware.txt"
+PCI_BEFORE="$RUN_DIR/pcie_before.txt"
+PCI_AFTER="$RUN_DIR/pcie_after.txt"
+P2P_INFO="$RUN_DIR/gpu_p2p_topology.txt"
+SYSTEM_INFO="$RUN_DIR/system_info.txt"
+COMMAND_FILE="$RUN_DIR/command.txt"
+POWER_RAW="$RUN_DIR/adcewatt_power_raw.csv"
+POWER_SUMMARY="$RUN_DIR/adcewatt_power_summary.txt"
+
+printf "%s\n" "$APP_CMD" > "$COMMAND_FILE"
+
+have_cmd() {
+    command -v "$1" >/dev/null 2>&1
+}
+
+collect_system_info() {
+    {
+        echo "Date: $(date)"
+        echo
+        echo "Command:"
+        echo "$APP_CMD"
+        echo
+        echo "uname:"
+        uname -a
+        echo
+        echo "lscpu:"
+        if have_cmd lscpu; then lscpu; else echo "lscpu not available"; fi
+        echo
+        echo "numactl --hardware:"
+        if have_cmd numactl; then numactl --hardware; else echo "numactl not available"; fi
+        echo
+        echo "nvidia-smi:"
+        if have_cmd nvidia-smi; then nvidia-smi; else echo "nvidia-smi not available"; fi
+    } > "$SYSTEM_INFO" 2>&1
+}
+
+collect_pcie_info() {
+    local out="$1"
+    {
+        echo "nvidia-smi PCIe status:"
+        if have_cmd nvidia-smi; then
+            nvidia-smi --query-gpu=index,name,pci.bus_id,pcie.link.gen.current,pcie.link.gen.max,pcie.link.width.current,pcie.link.width.max --format=csv,noheader,nounits
+        else
+            echo "nvidia-smi not available"
+        fi
+        echo
+        echo "lspci NVIDIA devices:"
+        if have_cmd lspci; then
+            lspci | grep -i nvidia || true
+        else
+            echo "lspci not available"
+        fi
+    } > "$out" 2>&1
+}
+
+start_gpu_monitor() {
+    if ! have_cmd nvidia-smi; then
+        echo "nvidia-smi not available" > "$GPU_LOG"
+        return
+    fi
+
+    echo "timestamp,index,name,util_gpu_percent,util_mem_percent,memory_used_MiB,memory_total_MiB,power_W,temp_C,pcie_gen_current,pcie_gen_max,pcie_width_current,pcie_width_max" > "$GPU_LOG"
+    (
+        while :; do
+            nvidia-smi --query-gpu=timestamp,index,name,utilization.gpu,utilization.memory,memory.used,memory.total,power.draw,temperature.gpu,pcie.link.gen.current,pcie.link.gen.max,pcie.link.width.current,pcie.link.width.max --format=csv,noheader,nounits >> "$GPU_LOG" 2>/dev/null
+            sleep "$INTERVAL"
+        done
+    ) &
+    GPU_MON_PID=$!
+}
+
+start_cpu_mem_monitor() {
+    (
+        while :; do
+            {
+                echo "===== $(date '+%F %T') ====="
+                ps -eLo pid,tid,psr,pcpu,pmem,rss,comm --sort=-pcpu | head -n 40
+                echo
+            } >> "$CPU_LOG" 2>/dev/null
+            sleep "$INTERVAL"
+        done
+    ) &
+    CPU_MON_PID=$!
+
+    (
+        while :; do
+            {
+                echo "===== $(date '+%F %T') ====="
+                free -m
+                echo
+                if have_cmd numastat; then numastat -m; fi
+                echo
+            } >> "$MEM_LOG" 2>/dev/null
+            sleep "$INTERVAL"
+        done
+    ) &
+    MEM_MON_PID=$!
+}
+
+stop_monitors() {
+    for pid in ${GPU_MON_PID:-} ${CPU_MON_PID:-} ${MEM_MON_PID:-}; do
+        if [[ -n "${pid:-}" ]] && kill -0 "$pid" 2>/dev/null; then
+            kill "$pid" 2>/dev/null || true
+            wait "$pid" 2>/dev/null || true
+        fi
+    done
+}
+
+start_power_monitor() {
+    POWER_MON_PID=""
+    POWER_MON_FILE_HANDLE=""
+
+    if [[ "$USE_ADCEWATT" -ne 1 ]]; then
+        echo "Adcewatt disabled by --no-adcewatt" > "$POWER_SUMMARY"
+        return
+    fi
+
+    if [[ ! -x "$WATTMETER" ]]; then
+        echo "Adcewatt wattmeter executable not found or not executable: $WATTMETER" > "$POWER_SUMMARY"
+        USE_ADCEWATT=0
+        return
+    fi
+
+    "$WATTMETER" -t "$WATTMETER_DEVICE" > "$POWER_RAW" 2> "$RUN_DIR/adcewatt_stderr.log" &
+    POWER_MON_PID=$!
+    sleep 1
+    if ! kill -0 "$POWER_MON_PID" 2>/dev/null; then
+        echo "Adcewatt wattmeter did not stay running. See $RUN_DIR/adcewatt_stderr.log" > "$POWER_SUMMARY"
+        USE_ADCEWATT=0
+        POWER_MON_PID=""
+    fi
+}
+
+stop_power_monitor() {
+    if [[ -n "${POWER_MON_PID:-}" ]] && kill -0 "$POWER_MON_PID" 2>/dev/null; then
+        kill "$POWER_MON_PID" 2>/dev/null || true
+        wait "$POWER_MON_PID" 2>/dev/null || true
+    fi
+}
+
+summarize_power_meter() {
+    local elapsed="$1"
+
+    if [[ "$USE_ADCEWATT" -ne 1 || ! -s "$POWER_RAW" ]]; then
+        if [[ ! -s "$POWER_SUMMARY" ]]; then
+            echo "Adcewatt power measurement not available" > "$POWER_SUMMARY"
+        fi
+        return
+    fi
+
+    awk -F',' -v elapsed="$elapsed" -v baseline="$BASELINE_POWER_WATTS" '
+    NR == 1 {
+        for (i=1; i<=NF; i++) {
+            gsub(/^ +| +$/, "", $i)
+            col[$i]=i
+        }
+        p8i=col["#activepow8"]
+        p9i=col["#activepow9"]
+        ti=0
+        if ("time" in col) ti=col["time"]
+        else if ("timestamp" in col) ti=col["timestamp"]
+        else if ("#time" in col) ti=col["#time"]
+        next
+    }
+    p8i && p9i {
+        p8=$p8i+0
+        p9=$p9i+0
+        p=p8+p9
+        n++
+        power[n]=p
+        sum+=p
+        if (n==1 || p<min) min=p
+        if (n==1 || p>max) max=p
+        if (ti) {
+            t=$ti+0
+            if (n==1) t0=t
+            times[n]=t-t0
+        }
+    }
+    END {
+        if (n == 0) {
+            print "Adcewatt power CSV has no valid #activepow8 + #activepow9 samples"
+            exit
+        }
+        mean=sum/n
+        energy=mean*elapsed
+        method="mean total power x application execution time"
+        if (ti && n >= 2) {
+            e=0
+            ok=1
+            for (i=2; i<=n; i++) {
+                dt=times[i]-times[i-1]
+                if (dt < 0) ok=0
+                if (dt >= 0) e += 0.5*(power[i]+power[i-1])*dt
+            }
+            if (ok && e > 0) {
+                energy=e
+                method="trapezoidal integration from wattmeter timestamps"
+            }
+        }
+        print "Adcewatt physical power meter"
+        print "  Total power: " sprintf("%.2f W", mean)
+        print "  Minimum power: " sprintf("%.2f W", min)
+        print "  Maximum power: " sprintf("%.2f W", max)
+        print "  Samples: " n
+        print "  Total energy: " sprintf("%.2f J", energy)
+        print "  Total energy: " sprintf("%.6f Wh", energy/3600.0)
+        print "  Integration method: " method
+        if (baseline != "") {
+            dynp=mean-baseline
+            dyne=dynp*elapsed
+            print "  Idle baseline power: " sprintf("%.2f W", baseline)
+            print "  Dynamic power: " sprintf("%.2f W", dynp)
+            print "  Dynamic energy: " sprintf("%.2f J", dyne)
+            print "  Dynamic energy: " sprintf("%.6f Wh", dyne/3600.0)
+        } else {
+            print "  Idle baseline power: not provided"
+            print "  Dynamic power: not available"
+            print "  Dynamic energy: not available"
+        }
+    }' "$POWER_RAW" > "$POWER_SUMMARY"
+}
+
+build_perf_events() {
+    local events=()
+    local candidates=(
+        cycles
+        instructions
+        cache-references
+        cache-misses
+        context-switches
+        cpu-migrations
+        page-faults
+        LLC-loads
+        LLC-load-misses
+    )
+
+    if ! have_cmd perf; then
+        echo ""
+        return
+    fi
+
+    for ev in "${candidates[@]}"; do
+        if perf stat -e "$ev" true >/dev/null 2>&1; then
+            events+=("$ev")
+        fi
+    done
+
+    local joined=""
+    for ev in "${events[@]}"; do
+        if [[ -z "$joined" ]]; then
+            joined="$ev"
+        else
+            joined="${joined},${ev}"
+        fi
+    done
+    echo "$joined"
+}
+
+summarize_gpu() {
+    local gpu_id="$1"
+    if [[ ! -s "$GPU_LOG" ]] || grep -q "not available" "$GPU_LOG"; then
+        echo "GPU ${gpu_id}: not available"
+        return
+    fi
+
+    awk -F',' -v id="$gpu_id" '
+    NR > 1 {
+        gsub(/^ +| +$/, "", $2)
+        if ($2 == id) {
+            n++
+            gsub(/^ +| +$/, "", $4); util=$4+0; sum_util+=util; if (util>max_util) max_util=util
+            gsub(/^ +| +$/, "", $6); mem=$6+0; if (mem>max_mem) max_mem=mem
+            gsub(/^ +| +$/, "", $9); temp=$9+0; if (temp>max_temp) max_temp=temp
+            gsub(/^ +| +$/, "", $10); gen=$10
+            gsub(/^ +| +$/, "", $12); width=$12
+        }
+    }
+    END {
+        if (n == 0) {
+            printf("GPU %s: no samples\n", id)
+        } else {
+            printf("GPU %s:\n", id)
+            printf("  Average utilization: %.2f %%\n", sum_util/n)
+            printf("  Maximum utilization: %.2f %%\n", max_util)
+            printf("  Maximum GPU memory: %.2f MiB\n", max_mem)
+            printf("  Maximum temperature: %.2f C\n", max_temp)
+            printf("  Last PCIe generation: %s\n", gen)
+            printf("  Last PCIe width: x%s\n", width)
+        }
+    }' "$GPU_LOG"
+}
+
+extract_perf_value() {
+    local pattern="$1"
+    if [[ ! -s "$PERF_LOG" ]]; then
+        echo "not available"
+        return
+    fi
+    awk -v p="$pattern" '
+    $0 ~ p {
+        val=$1
+        gsub(/,/, "", val)
+        print val
+        found=1
+        exit
+    }
+    END { if (!found) print "not available" }' "$PERF_LOG"
+}
+
+make_summary() {
+    local exit_status="$1"
+    local elapsed="$2"
+    local cycles instructions ipc cache_refs cache_misses ctx
+    cycles="$(extract_perf_value "cycles")"
+    instructions="$(extract_perf_value "instructions")"
+    cache_refs="$(extract_perf_value "cache-references")"
+    cache_misses="$(extract_perf_value "cache-misses")"
+    ctx="$(extract_perf_value "context-switches")"
+
+    ipc="not available"
+    if [[ "$cycles" != "not available" && "$instructions" != "not available" && "$cycles" != "0" ]]; then
+        ipc="$(awk -v ins="$instructions" -v cyc="$cycles" 'BEGIN { printf "%.4f", ins / cyc }')"
+    fi
+
+    local peak_ram
+    peak_ram="not available"
+    if [[ -s "$CPU_LOG" ]]; then
+        peak_ram="$(awk 'NR>1 && $6 ~ /^[0-9.]+$/ { if ($6>m) m=$6 } END { if (m>0) printf "%.2f MiB", m/1024; else print "not available" }' "$CPU_LOG")"
+    fi
+
+    {
+        echo "================ PERFORMANCE SUMMARY ================"
+        echo
+        echo "Application:"
+        echo "  Command: $APP_CMD"
+        echo "  Execution time: ${elapsed} s"
+        echo "  Exit status: $exit_status"
+        echo "  Results directory: $RUN_DIR"
+        echo
+        echo "CPU:"
+        echo "  Cycles: $cycles"
+        echo "  Instructions: $instructions"
+        echo "  IPC: $ipc"
+        echo "  Context switches: $ctx"
+        echo "  CPU/thread samples: $CPU_LOG"
+        echo
+        echo "CACHE:"
+        echo "  Cache references: $cache_refs"
+        echo "  Cache misses: $cache_misses"
+        if [[ "$cache_refs" != "not available" && "$cache_misses" != "not available" && "$cache_refs" != "0" ]]; then
+            awk -v miss="$cache_misses" -v refs="$cache_refs" 'BEGIN { printf "  Cache miss rate: %.4f %%\n", (miss/refs)*100.0 }'
+        else
+            echo "  Cache miss rate: not available"
+        fi
+        echo "  LLC information: see $PERF_LOG if LLC events were supported"
+        echo
+        echo "MEMORY:"
+        echo "  Peak sampled process RSS: $peak_ram"
+        echo "  Memory and NUMA samples: $MEM_LOG"
+        echo "  Memory bandwidth: not measured unless platform perf/uncore counters are added"
+        echo
+        echo "NUMA:"
+        echo "  NUMA before: $NUMA_BEFORE"
+        echo "  NUMA after: $NUMA_AFTER"
+        echo "  NUMA hardware: $NUMA_HW"
+        echo "  Local/remote NUMA details depend on available numastat counters"
+        echo
+        echo "ENERGY:"
+        if [[ -s "$POWER_SUMMARY" ]]; then
+            sed 's/^/  /' "$POWER_SUMMARY"
+        else
+            echo "  Adcewatt power measurement not available"
+        fi
+        echo "  Raw Adcewatt samples: $POWER_RAW"
+        echo
+        summarize_gpu 0
+        echo
+        summarize_gpu 1
+        echo
+        echo "DATA MOVEMENT:"
+        echo "  PCIe before run: $PCI_BEFORE"
+        echo "  PCIe after run: $PCI_AFTER"
+        echo "  GPU P2P/topology information: $P2P_INFO"
+        echo "  Host-to-device/device-to-host bandwidth: not directly measured by this wrapper"
+        echo "  Detailed GPU samples: $GPU_LOG"
+        echo
+        echo "Raw logs:"
+        echo "  Application stdout: $APP_STDOUT"
+        echo "  Application stderr: $APP_STDERR"
+        echo "  perf stat: $PERF_LOG"
+        echo
+        echo "====================================================="
+    } | tee "$SUMMARY"
+}
+
+collect_system_info
+
+if have_cmd numactl; then numactl --hardware > "$NUMA_HW" 2>&1; else echo "numactl not available" > "$NUMA_HW"; fi
+if have_cmd numastat; then numastat -m > "$NUMA_BEFORE" 2>&1; else echo "numastat not available" > "$NUMA_BEFORE"; fi
+collect_pcie_info "$PCI_BEFORE"
+if have_cmd nvidia-smi; then nvidia-smi topo -m > "$P2P_INFO" 2>&1; else echo "nvidia-smi not available" > "$P2P_INFO"; fi
+
+start_gpu_monitor
+start_cpu_mem_monitor
+start_power_monitor
+
+PERF_EVENTS="$(build_perf_events)"
+START_NS="$(date +%s%N)"
+
+if [[ -n "$PERF_EVENTS" ]] && have_cmd perf; then
+    perf stat -o "$PERF_LOG" -e "$PERF_EVENTS" bash -lc "$APP_CMD" > "$APP_STDOUT" 2> "$APP_STDERR"
+    EXIT_STATUS=$?
+else
+    echo "perf not available or no permitted perf events. Application was run without perf counters." > "$PERF_LOG"
+    bash -lc "$APP_CMD" > "$APP_STDOUT" 2> "$APP_STDERR"
+    EXIT_STATUS=$?
+fi
+
+END_NS="$(date +%s%N)"
+ELAPSED="$(awk -v s="$START_NS" -v e="$END_NS" 'BEGIN { printf "%.3f", (e-s)/1000000000.0 }')"
+
+stop_monitors
+stop_power_monitor
+
+if have_cmd numastat; then numastat -m > "$NUMA_AFTER" 2>&1; else echo "numastat not available" > "$NUMA_AFTER"; fi
+collect_pcie_info "$PCI_AFTER"
+summarize_power_meter "$ELAPSED"
+
+make_summary "$EXIT_STATUS" "$ELAPSED"
+exit "$EXIT_STATUS"

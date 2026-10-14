@@ -1,0 +1,63 @@
+Physical_length_in_x_direction: 0.05
+Physical_length_in_y_direction: 0.05
+Physical_length_in_z_direction: 0.05
+
+Number_of_cells_in_x_direction: 100
+Number_of_cells_in_y_direction: 100
+Number_of_cells_in_z_direction: 100
+
+Periodic_in_x: 1
+Periodic_in_y: 0
+Periodic_in_z: 1
+
+Physical_density: 1000
+Density_conversion_factor: 1000
+Physical_viscosity: 0.000001
+
+Physical_vx_back: 0.0
+Physical_vx_bottom: 0.0
+Physical_vx_front: 0.0
+Physical_vx_left: 0.0
+Physical_vx_right: 0.0
+Physical_vx_top: 0.0002
+
+Physical_vy_back: 0.0
+Physical_vy_bottom: 0.0
+Physical_vy_front: 0.0
+Physical_vy_left: 0.0
+Physical_vy_right: 0.0
+Physical_vy_top: 0.0
+
+Physical_vz_back: 0.0
+Physical_vz_bottom: 0.0
+Physical_vz_front: 0.0
+Physical_vz_left: 0.0
+Physical_vz_right: 0.0
+Physical_vz_top: 0.0
+
+Relaxation_factor: 0.8
+Relaxation_type: 0
+S_type: 0
+Simulation_type: 0
+Del_x_dimension: 1
+
+Physical_characteristic_dimension_to_use: 0.05
+Physical_characteristic_velocity_to_use: 0.0002
+
+Multiple_timestep_output: 0
+Remote_output: 0
+
+Object_placed: 0
+Physical_object_critical_dimension: 0.01
+Physical_object_location_x: 0.2
+Physical_object_location_y: 0.06
+Physical_object_location_z: 0.06
+
+Heterogeneous_mode: 1
+GPU0_weight: 0.42
+GPU1_weight: 0.42
+CPU_weight: 0.16
+GPU0_id: 0
+GPU1_id: 1
+CPU_threads: 64
+
