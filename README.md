@@ -1,4 +1,4 @@
-# CA-HeteroLBM
+# CA-HeteroLBM-Algorithm
 
 **CA-HeteroLBM** is a communication-aware heterogeneous CPU-GPU Lattice Boltzmann Method (LBM) solver for 3D Couette flow simulation. It supports single-GPU, multi-GPU, heterogeneous CPU+GPU, optimized heterogeneous, and GPU-aware optimized heterogeneous execution within one runtime workflow.
 
