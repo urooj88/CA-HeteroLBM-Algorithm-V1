@@ -190,7 +190,7 @@ If you use this repository in research, please cite the associated publication w
 
 ## Acknowledgements
 
-Developed at Technological University Dublin, Ireland.
+This research was developed at the HPC-Nexus Lab, Technological University Dublin, Ireland.
 
 **PhD Funding:** My PhD research is funded by the **Irish Research Council (IRC)**.
 
