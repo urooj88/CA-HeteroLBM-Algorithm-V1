@@ -1,0 +1,416 @@
+How to run the LBM solver for all execution modes
+=================================================
+
+Project folder
+--------------
+Run all commands from:
+
+  /home/urooj/CA-HetroLBM-Algorithm-Git
+
+Go to the project folder:
+
+  cd /home/urooj/CA-HetroLBM-Algorithm-Git
+
+
+1. Build the executable
+-----------------------
+
+Default build:
+
+  make clean
+  make
+
+GPU-aware MPI build:
+
+  make clean
+  make MPICXX=/home/urooj/openmpi-cuda/bin/mpicxx
+
+For GPU-aware MPI runs, use the CUDA-aware Open MPI environment before running:
+
+  export PATH=/home/urooj/openmpi-cuda/bin:$PATH
+  export LD_LIBRARY_PATH=/home/urooj/openmpi-cuda/lib:$LD_LIBRARY_PATH
+
+Check that the correct mpirun is selected:
+
+  which mpirun
+
+Expected for GPU-aware MPI runs:
+
+  /home/urooj/openmpi-cuda/bin/mpirun
+
+Important:
+
+  You do not need to rebuild for every problem size. Build once with CUDA-aware Open MPI, set the PATH and LD_LIBRARY_PATH once in the terminal, and then run all required problem sizes from the same terminal session.
+
+  Rebuild only when you change the source code or when you switch back to a different MPI implementation.
+
+  In the current code, GPU-aware communication is controlled by an explicit runtime flag:
+
+    --gpu-aware-mpi
+
+  If this flag is not used, the optimized heterogeneous version uses the host-staged MPI path, even when the executable is built with CUDA-aware Open MPI.
+
+
+2. Normal application runs without energy measurement
+-----------------------------------------------------
+
+These commands run the solver and save normal timing/correctness results.
+
+Output is saved in:
+
+  baseline_results/
+
+Each run creates a timestamped folder containing:
+
+  app_stdout.log
+  app_stderr.log
+  report.json
+
+The combined summary is saved in:
+
+  baseline_results/baseline_summary.csv
+
+
+Mode 1: Single GPU
+------------------
+
+Run one selected GPU. Example with GPU 0:
+
+  python3 bin/run_lbm_baseline.py \
+    --mode single-gpu \
+    --size 100 \
+    --gpus 0
+
+Other sizes:
+
+  python3 bin/run_lbm_baseline.py --mode single-gpu --size 150 --gpus 0
+  python3 bin/run_lbm_baseline.py --mode single-gpu --size 200 --gpus 0
+  python3 bin/run_lbm_baseline.py --mode single-gpu --size 250 --gpus 0
+
+
+Mode 2: Multi GPU
+-----------------
+
+Run two GPU ranks on GPU 0 and GPU 1:
+
+  python3 bin/run_lbm_baseline.py \
+    --mode multi-gpu \
+    --size 100 \
+    --gpus 0,1
+
+Other sizes:
+
+  python3 bin/run_lbm_baseline.py --mode multi-gpu --size 150 --gpus 0,1
+  python3 bin/run_lbm_baseline.py --mode multi-gpu --size 200 --gpus 0,1
+  python3 bin/run_lbm_baseline.py --mode multi-gpu --size 250 --gpus 0,1
+
+
+Mode 3: Optimized heterogeneous CPU+GPU
+---------------------------------------
+
+Run two GPU ranks and one CPU rank using the GPU-GPU-CPU layout. When --cpu-threads is 0, the fixed tuned profile is used:
+
+  100^3 -> 8 CPU threads
+  150^3 -> 16 CPU threads
+  200^3 -> 32 CPU threads
+  250^3 -> 32 CPU threads
+
+Command:
+
+  python3 bin/run_lbm_baseline.py \
+    --mode hetero \
+    --size 100 \
+    --gpus 0,1 \
+    --cpu-threads 0 \
+    --hetero-layout gpu-gpu-cpu
+
+Other sizes:
+
+  python3 bin/run_lbm_baseline.py --mode hetero --size 150 --gpus 0,1 --cpu-threads 0 --hetero-layout gpu-gpu-cpu
+  python3 bin/run_lbm_baseline.py --mode hetero --size 200 --gpus 0,1 --cpu-threads 0 --hetero-layout gpu-gpu-cpu
+  python3 bin/run_lbm_baseline.py --mode hetero --size 250 --gpus 0,1 --cpu-threads 0 --hetero-layout gpu-gpu-cpu
+
+
+Mode 4: GPU-aware optimized heterogeneous CPU+GPU
+-------------------------------------------------
+
+This mode uses the same command-line mode as hetero, but the executable must be
+built with CUDA-aware Open MPI and run with /home/urooj/openmpi-cuda/bin/mpirun.
+
+Communication path:
+
+  GPU-GPU halo exchange: GPU buffer -> MPI -> GPU buffer
+  CPU-GPU halo exchange: GPU buffer -> host buffer -> MPI -> host buffer -> GPU buffer
+
+Build and set environment:
+
+  make clean
+  make MPICXX=/home/urooj/openmpi-cuda/bin/mpicxx
+
+  export PATH=/home/urooj/openmpi-cuda/bin:$PATH
+  export LD_LIBRARY_PATH=/home/urooj/openmpi-cuda/lib:$LD_LIBRARY_PATH
+
+  which mpirun
+
+You only need to build once and export the environment once per terminal
+session. After this, all GPU-aware problem sizes can be run without rebuilding.
+
+Run GPU-aware optimized hetero:
+
+  python3 bin/run_lbm_baseline.py \
+    --mode hetero \
+    --size 100 \
+    --gpus 0,1 \
+    --cpu-threads 0 \
+    --hetero-layout gpu-gpu-cpu \
+    --gpu-aware-mpi
+
+Other sizes:
+
+  python3 bin/run_lbm_baseline.py --mode hetero --size 150 --gpus 0,1 --cpu-threads 0 --hetero-layout gpu-gpu-cpu --gpu-aware-mpi
+  python3 bin/run_lbm_baseline.py --mode hetero --size 200 --gpus 0,1 --cpu-threads 0 --hetero-layout gpu-gpu-cpu --gpu-aware-mpi
+  python3 bin/run_lbm_baseline.py --mode hetero --size 250 --gpus 0,1 --cpu-threads 0 --hetero-layout gpu-gpu-cpu --gpu-aware-mpi
+
+Note:
+
+  run_lbm_baseline.py runs one problem size at a time. For energy runs, the
+  run_lbm_energy_adcewatt.py script can run multiple sizes with --sizes.
+
+For final tuned runs, --cpu-threads 0 now uses the selected 32-thread
+configuration for 250^3:
+
+  python3 bin/run_lbm_baseline.py --mode hetero --size 100 --gpus 0,1 --cpu-threads 0 --hetero-layout gpu-gpu-cpu --gpu-aware-mpi
+  python3 bin/run_lbm_baseline.py --mode hetero --size 150 --gpus 0,1 --cpu-threads 0 --hetero-layout gpu-gpu-cpu --gpu-aware-mpi
+  python3 bin/run_lbm_baseline.py --mode hetero --size 200 --gpus 0,1 --cpu-threads 0 --hetero-layout gpu-gpu-cpu --gpu-aware-mpi
+  python3 bin/run_lbm_baseline.py --mode hetero --size 250 --gpus 0,1 --cpu-threads 0 --hetero-layout gpu-gpu-cpu --gpu-aware-mpi
+
+
+3. Energy measurement runs
+--------------------------
+
+Energy runs use:
+
+  bin/run_lbm_energy_adcewatt.py
+
+Output is saved in:
+
+  bin/energy_results/
+
+Each energy batch creates a timestamped folder containing:
+
+  lbm_energy_summary.csv
+  energy_summary.json
+  app_stdout.log
+  app_stderr.log
+  raw_power.csv
+
+Use --new-baseline when you want to measure a fresh idle baseline power before
+the application run.
+
+
+Energy: Single GPU
+------------------
+
+  python3 bin/run_lbm_energy_adcewatt.py \
+    --mode single-gpu \
+    --sizes 100 \
+    --gpus 0 \
+    --new-baseline
+
+Other sizes:
+
+  python3 bin/run_lbm_energy_adcewatt.py --mode single-gpu --sizes 150 --gpus 0 --new-baseline
+  python3 bin/run_lbm_energy_adcewatt.py --mode single-gpu --sizes 200 --gpus 0 --new-baseline
+  python3 bin/run_lbm_energy_adcewatt.py --mode single-gpu --sizes 250 --gpus 0 --new-baseline
+
+
+Energy: Multi GPU
+-----------------
+
+  python3 bin/run_lbm_energy_adcewatt.py \
+    --mode multi-gpu \
+    --sizes 100 \
+    --gpus 0,1 \
+    --new-baseline
+
+Other sizes:
+
+  python3 bin/run_lbm_energy_adcewatt.py --mode multi-gpu --sizes 150 --gpus 0,1 --new-baseline
+  python3 bin/run_lbm_energy_adcewatt.py --mode multi-gpu --sizes 200 --gpus 0,1 --new-baseline
+  python3 bin/run_lbm_energy_adcewatt.py --mode multi-gpu --sizes 250 --gpus 0,1 --new-baseline
+
+
+Energy: Optimized heterogeneous CPU+GPU
+---------------------------------------
+
+  python3 bin/run_lbm_energy_adcewatt.py \
+    --mode hetero \
+    --sizes 100 \
+    --gpus 0,1 \
+    --cpu-threads 0 \
+    --hetero-layout gpu-gpu-cpu \
+    --new-baseline
+
+Other sizes:
+
+  python3 bin/run_lbm_energy_adcewatt.py --mode hetero --sizes 150 --gpus 0,1 --cpu-threads 0 --hetero-layout gpu-gpu-cpu --new-baseline
+  python3 bin/run_lbm_energy_adcewatt.py --mode hetero --sizes 200 --gpus 0,1 --cpu-threads 0 --hetero-layout gpu-gpu-cpu --new-baseline
+  python3 bin/run_lbm_energy_adcewatt.py --mode hetero --sizes 250 --gpus 0,1 --cpu-threads 0 --hetero-layout gpu-gpu-cpu --new-baseline
+
+
+Energy: GPU-aware optimized heterogeneous CPU+GPU
+-------------------------------------------------
+
+Before running, build with CUDA-aware Open MPI and set the environment:
+
+  make clean
+  make MPICXX=/home/urooj/openmpi-cuda/bin/mpicxx
+
+  export PATH=/home/urooj/openmpi-cuda/bin:$PATH
+  export LD_LIBRARY_PATH=/home/urooj/openmpi-cuda/lib:$LD_LIBRARY_PATH
+
+Build once and keep this terminal open. Then run all required sizes without
+rebuilding unless the source code changes.
+
+Then run:
+
+  python3 bin/run_lbm_energy_adcewatt.py \
+    --mode hetero \
+    --sizes 100 \
+    --gpus 0,1 \
+    --cpu-threads 0 \
+    --hetero-layout gpu-gpu-cpu \
+    --gpu-aware-mpi \
+    --new-baseline
+
+Other sizes:
+
+  python3 bin/run_lbm_energy_adcewatt.py --mode hetero --sizes 150 --gpus 0,1 --cpu-threads 0 --hetero-layout gpu-gpu-cpu --gpu-aware-mpi --new-baseline
+  python3 bin/run_lbm_energy_adcewatt.py --mode hetero --sizes 200 --gpus 0,1 --cpu-threads 0 --hetero-layout gpu-gpu-cpu --gpu-aware-mpi --new-baseline
+  python3 bin/run_lbm_energy_adcewatt.py --mode hetero --sizes 250 --gpus 0,1 --cpu-threads 0 --hetero-layout gpu-gpu-cpu --gpu-aware-mpi --new-baseline
+
+Run all GPU-aware optimized hetero energy sizes in one command using automatic
+thread selection:
+
+  python3 bin/run_lbm_energy_adcewatt.py \
+    --mode hetero \
+    --sizes 100,150,200,250 \
+    --gpus 0,1 \
+    --cpu-threads 0 \
+    --hetero-layout gpu-gpu-cpu \
+    --gpu-aware-mpi \
+    --new-baseline
+
+For final tuned energy runs, --cpu-threads 0 now uses the selected 32-thread
+configuration for 250^3:
+
+  python3 bin/run_lbm_energy_adcewatt.py --mode hetero --sizes 100 --gpus 0,1 --cpu-threads 0 --hetero-layout gpu-gpu-cpu --gpu-aware-mpi --new-baseline
+  python3 bin/run_lbm_energy_adcewatt.py --mode hetero --sizes 150 --gpus 0,1 --cpu-threads 0 --hetero-layout gpu-gpu-cpu --gpu-aware-mpi --new-baseline
+  python3 bin/run_lbm_energy_adcewatt.py --mode hetero --sizes 200 --gpus 0,1 --cpu-threads 0 --hetero-layout gpu-gpu-cpu --gpu-aware-mpi --new-baseline
+  python3 bin/run_lbm_energy_adcewatt.py --mode hetero --sizes 250 --gpus 0,1 --cpu-threads 0 --hetero-layout gpu-gpu-cpu --gpu-aware-mpi --new-baseline
+
+
+4. Useful result-check commands
+-------------------------------
+
+Find the latest energy summary:
+
+  ls -td bin/energy_results/lbm_energy_* | head -1
+
+Print the latest hetero energy summary:
+
+  cat $(ls -td bin/energy_results/lbm_energy_*_hetero/lbm_energy_summary.csv | head -1)
+
+Get compute, communication, and I/O time from the latest hetero run:
+
+  grep -A 6 '"timing"' $(python3 - <<'PY'
+import csv, glob, os
+files = glob.glob('bin/energy_results/lbm_energy_*_hetero/lbm_energy_summary.csv')
+latest = max(files, key=os.path.getmtime)
+with open(latest) as f:
+    row = list(csv.DictReader(f))[0]
+print(row['lbm_report_json'])
+PY
+)
+
+
+5. Notes
+--------
+
+Use normal application runs first to check correctness before launching long energy runs.
+
+Single-GPU uses one GPU and has almost no MPI halo communication.
+
+Multi-GPU uses two GPU MPI ranks and Z-direction halo exchange.
+
+Heterogeneous mode uses two GPU MPI ranks and one CPU MPI rank.
+
+GPU-aware optimized hetero requires the CUDA-aware Open MPI build:
+
+  /home/urooj/openmpi-cuda
+
+The target GPU topology is SYS rather than direct NVLink, so GPU-aware MPI benefits can depend on problem size.
+
+
+6. Running with or without the AdceWatt power meter
+---------------------------------------------------
+
+The solver can be built and run without the AdceWatt power meter. In this case,
+use the normal baseline runner:
+
+  python3 bin/run_lbm_baseline.py \
+    --mode single-gpu \
+    --size 100 \
+    --gpus 0
+
+This produces timing and correctness results, but no measured energy values.
+
+Energy measurement is optional and requires the AdceWatt power meter to be installed, connected, and readable from the machine running the solver. The energy scripts measure idle baseline power first, then run the LBM application, and then compute total and dynamic energy.
+
+Before running full energy measurements, check that the wattmeter script works:
+
+  python3 bin/run_basepower_adcewatt_var_std.py \
+    --repetitions 3 \
+    --measurement-time 5 \
+    --sleep 1
+
+If the meter is detected correctly, this should print idle power measurements.
+
+Then run an energy experiment:
+
+  python3 bin/run_lbm_energy_adcewatt.py \
+    --mode hetero \
+    --sizes 100 \
+    --gpus 0,1 \
+    --cpu-threads 0 \
+    --hetero-layout gpu-gpu-cpu \
+    --new-baseline
+
+For GPU-aware optimized heterogeneous energy measurement:
+
+  python3 bin/run_lbm_energy_adcewatt.py \
+    --mode hetero \
+    --sizes 100 \
+    --gpus 0,1 \
+    --cpu-threads 0 \
+    --hetero-layout gpu-gpu-cpu \
+    --gpu-aware-mpi \
+    --new-baseline
+
+Energy results are saved in:
+
+  bin/energy_results/
+
+Each energy run saves:
+
+  lbm_energy_summary.csv
+  energy_summary.json
+  app_stdout.log
+  app_stderr.log
+  raw_power.csv
+
+If the user does not have an AdceWatt power meter, they should use only run_lbm_baseline.py.
+
+
+
+

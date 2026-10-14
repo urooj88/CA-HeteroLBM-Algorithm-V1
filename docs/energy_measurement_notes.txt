@@ -1,0 +1,241 @@
+Run energy measurement with Adcewatt physical power meter
+=========================================================
+
+Run these commands from the LBM project folder:
+
+  cd /home/urooj/CA-HetroLBM-Algorithm-Git
+
+Important mode note
+-------------------
+The runnable algorithm has three main command modes:
+
+  1. single-gpu
+  2. multi-gpu
+  3. hetero
+
+In the report/results, there can be five comparison cases:
+
+  1. single GPU baseline
+  2. multi GPU parallel version
+  3. original hetero CPU + GPU version
+  4. optimized hetero CPU + GPU version
+  5. GPU-aware optimized hetero CPU + GPU version
+
+The optimized hetero version is not a separate command mode. It uses:
+
+  --mode hetero --hetero-layout gpu-gpu-cpu
+
+with the reduced 5-PDF Z-halo communication optimization and final tested CPU participation profiles.
+
+The GPU-aware optimized version also uses --mode hetero, but adds:
+
+  --gpu-aware-mpi
+
+This enables direct GPU-buffer MPI exchange for GPU-GPU halo communication.
+
+
+1. Single GPU energy measurement
+--------------------------------
+Dry run first:
+
+  ./bin/run_lbm_energy_adcewatt.py \
+    --mode single-gpu \
+    --sizes 100,150,200,250 \
+    --dry-run
+
+Real run:
+
+  ./bin/run_lbm_energy_adcewatt.py \
+    --mode single-gpu \
+    --sizes 100,150,200,250 \
+    --new-baseline
+
+
+2. Multi GPU energy measurement
+-------------------------------
+Dry run first:
+
+  ./bin/run_lbm_energy_adcewatt.py \
+    --mode multi-gpu \
+    --sizes 100,150,200,250 \
+    --dry-run
+
+Real run:
+
+  ./bin/run_lbm_energy_adcewatt.py \
+    --mode multi-gpu \
+    --sizes 100,150,200,250 \
+    --new-baseline
+
+
+3. Hetero CPU + GPUs energy measurement
+---------------------------------------
+Use the optimized hetero communication version:
+
+  - Z decomposition
+  - layout: gpu-gpu-cpu
+  - reduced Z-halo exchange: 5 PDFs per boundary cell
+  - final tested CPU participation profiles:
+      100^3 -> fixed application profile, CPU=2 Z planes, 8 threads
+      150^3 -> fixed application profile, CPU=3 Z planes, 16 threads
+      200^3 -> fixed application profile, CPU=4 Z planes, 32 threads
+      250^3 -> fixed application profile, CPU=5 Z planes, 32 threads
+
+Use --cpu-threads 0 for the final tuned profile. The solver will select:
+
+  100^3 -> 8 CPU threads
+  150^3 -> 16 CPU threads
+  200^3 -> 32 CPU threads
+  250^3 -> 32 CPU threads
+
+Dry run first:
+
+  ./bin/run_lbm_energy_adcewatt.py \
+    --mode hetero \
+    --sizes 100,150,200,250 \
+    --hetero-layout gpu-gpu-cpu \
+    --gpus 0,1 \
+    --cpu-threads 0 \
+    --dry-run
+
+Real run:
+
+  ./bin/run_lbm_energy_adcewatt.py \
+    --mode hetero \
+    --sizes 100,150,200,250 \
+    --hetero-layout gpu-gpu-cpu \
+    --gpus 0,1 \
+    --cpu-threads 0 \
+    --new-baseline
+
+Run one hetero size at a time if you want safer long measurements:
+
+  ./bin/run_lbm_energy_adcewatt.py \
+    --mode hetero \
+    --sizes 100 \
+    --hetero-layout gpu-gpu-cpu \
+    --gpus 0,1 \
+    --cpu-threads 0 \
+    --new-baseline
+
+  ./bin/run_lbm_energy_adcewatt.py \
+    --mode hetero \
+    --sizes 150 \
+    --hetero-layout gpu-gpu-cpu \
+    --gpus 0,1 \
+    --cpu-threads 0
+
+  ./bin/run_lbm_energy_adcewatt.py \
+    --mode hetero \
+    --sizes 200 \
+    --hetero-layout gpu-gpu-cpu \
+    --gpus 0,1 \
+    --cpu-threads 0
+
+  ./bin/run_lbm_energy_adcewatt.py \
+    --mode hetero \
+    --sizes 250 \
+    --hetero-layout gpu-gpu-cpu \
+    --gpus 0,1 \
+    --cpu-threads 0
+
+
+4. GPU-aware optimized hetero energy measurement
+------------------------------------------------
+
+Build with CUDA-aware Open MPI first:
+
+  make clean
+  make MPICXX=/home/urooj/openmpi-cuda/bin/mpicxx
+
+Set the CUDA-aware MPI environment:
+
+  export PATH=/home/urooj/openmpi-cuda/bin:$PATH
+  export LD_LIBRARY_PATH=/home/urooj/openmpi-cuda/lib:$LD_LIBRARY_PATH
+
+Then run:
+
+  ./bin/run_lbm_energy_adcewatt.py \
+    --mode hetero \
+    --sizes 100,150,200,250 \
+    --hetero-layout gpu-gpu-cpu \
+    --gpus 0,1 \
+    --cpu-threads 0 \
+    --gpu-aware-mpi \
+    --new-baseline
+
+
+Output locations
+----------------
+Normal Adcewatt energy wrapper output:
+
+  bin/energy_results
+
+Final all-mode comparison table:
+
+  results_summary
+
+This folder contains:
+
+  final_all_modes_energy_comparison.csv
+  final_all_modes_energy_comparison.xlsx
+
+
+Important notes
+---------------
+Use dry run before real measurement.
+
+Do not run energy measurements if another user/process is using the GPUs.
+
+Single GPU 250^3 takes a long time, around 16681 seconds.
+
+Use --new-baseline when you want a fresh idle power baseline measurement.
+
+For final comparison, collect:
+
+  - wall time
+  - final error
+  - total power
+  - total energy
+  - dynamic energy
+  - mode name
+  - problem size
+
+
+Normal LBM runs without energy measurement
+------------------------------------------
+Use these before energy measurement to confirm correctness and timing.
+
+Single GPU:
+
+  ./bin/run_lbm_baseline.py --mode single-gpu --size 100
+  ./bin/run_lbm_baseline.py --mode single-gpu --size 150
+  ./bin/run_lbm_baseline.py --mode single-gpu --size 200
+  ./bin/run_lbm_baseline.py --mode single-gpu --size 250
+
+Multi GPU:
+
+  ./bin/run_lbm_baseline.py --mode multi-gpu --size 100 --gpus 0,1
+  ./bin/run_lbm_baseline.py --mode multi-gpu --size 150 --gpus 0,1
+  ./bin/run_lbm_baseline.py --mode multi-gpu --size 200 --gpus 0,1
+  ./bin/run_lbm_baseline.py --mode multi-gpu --size 250 --gpus 0,1
+
+Optimized hetero CPU + GPUs:
+
+  ./bin/run_lbm_baseline.py --mode hetero --size 100 --hetero-layout gpu-gpu-cpu --gpus 0,1 --cpu-threads 0
+  ./bin/run_lbm_baseline.py --mode hetero --size 150 --hetero-layout gpu-gpu-cpu --gpus 0,1 --cpu-threads 0
+  ./bin/run_lbm_baseline.py --mode hetero --size 200 --hetero-layout gpu-gpu-cpu --gpus 0,1 --cpu-threads 0
+  ./bin/run_lbm_baseline.py --mode hetero --size 250 --hetero-layout gpu-gpu-cpu --gpus 0,1 --cpu-threads 0
+
+GPU-aware optimized hetero CPU + GPUs:
+
+  ./bin/run_lbm_baseline.py --mode hetero --size 100 --hetero-layout gpu-gpu-cpu --gpus 0,1 --cpu-threads 0 --gpu-aware-mpi
+  ./bin/run_lbm_baseline.py --mode hetero --size 150 --hetero-layout gpu-gpu-cpu --gpus 0,1 --cpu-threads 0 --gpu-aware-mpi
+  ./bin/run_lbm_baseline.py --mode hetero --size 200 --hetero-layout gpu-gpu-cpu --gpus 0,1 --cpu-threads 0 --gpu-aware-mpi
+  ./bin/run_lbm_baseline.py --mode hetero --size 250 --hetero-layout gpu-gpu-cpu --gpus 0,1 --cpu-threads 0 --gpu-aware-mpi
+  
+  
+  
+  
+  
+  

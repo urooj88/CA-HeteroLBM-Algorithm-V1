@@ -1,0 +1,106 @@
+How many modes can I run currently?
+===================================
+
+From the Python runtime interface, there are three command-line modes:
+
+  1. single-gpu
+  2. multi-gpu
+  3. hetero
+
+These are selected using:
+
+  --mode single-gpu
+  --mode multi-gpu
+  --mode hetero
+
+
+Experimental execution configurations
+-------------------------------------
+
+Although there are three command-line modes, the current implementation can be used to evaluate four execution configurations:
+
+  1. Single GPU
+     Command-line mode:
+
+       --mode single-gpu
+
+     Meaning:
+
+       One GPU processes the complete LBM domain.
+
+
+  2. Multi GPU
+     Command-line mode:
+
+       --mode multi-gpu
+
+     Meaning:
+
+       Two GPU MPI ranks process two Z-slabs and exchange halo data.
+
+
+  3. Optimized heterogeneous CPU+GPU Command-line mode:
+
+       --mode hetero
+
+     Meaning:
+
+       Two GPU MPI ranks and one CPU MPI rank use the GPU-GPU-CPU layout.
+       The optimized 5-direction Z-halo exchange is used.
+       GPU-GPU and CPU-GPU halo exchange use the normal host-staged MPI path.
+
+     Build/run setup:
+
+       make clean
+       make
+
+
+  4. GPU-aware optimized heterogeneous CPU+GPU
+     Command-line mode:
+
+       --mode hetero
+
+     Meaning:
+
+       Two GPU MPI ranks and one CPU MPI rank use the GPU-GPU-CPU layout.
+       The optimized 5-direction Z-halo exchange is used.
+       GPU-GPU halo exchange uses CUDA-aware MPI directly with GPU device buffers.
+       CPU-GPU halo exchange still uses host-staged MPI because the CPU rank owns
+       host memory.
+
+     Build/run setup:
+
+       make clean
+       make MPICXX=/home/urooj/openmpi-cuda/bin/mpicxx
+
+       export PATH=/home/urooj/openmpi-cuda/bin:$PATH
+       export LD_LIBRARY_PATH=/home/urooj/openmpi-cuda/lib:$LD_LIBRARY_PATH
+
+       which mpirun
+
+     Expected mpirun for GPU-aware runs:
+
+       /home/urooj/openmpi-cuda/bin/mpirun
+
+
+Important note
+--------------
+
+The optimized heterogeneous version and the GPU-aware optimized heterogeneous version both use:
+
+  --mode hetero
+
+The difference is the executable build and MPI runtime:
+
+  - Normal optimized hetero:
+      built with the default MPI path and uses host-staged MPI exchange.
+
+  - GPU-aware optimized hetero:
+      built with /home/urooj/openmpi-cuda/bin/mpicxx and run with
+      /home/urooj/openmpi-cuda/bin/mpirun.
+
+Therefore:
+
+  Command-line selectable modes: 3
+  Experimentally runnable configurations: 4
+

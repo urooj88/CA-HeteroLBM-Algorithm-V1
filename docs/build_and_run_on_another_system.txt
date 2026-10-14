@@ -1,0 +1,344 @@
+How to download, build, and run CA-HeteroLBM on another system
+==============================================================
+
+This guide is for a new user who downloads the Git-ready CA-HeteroLBM repository and wants to build and run the solver on another Linux/HPC system.
+
+
+1. Supported execution modes
+----------------------------
+
+The Python runtime interface has three command-line modes:
+
+  1. single-gpu
+  2. multi-gpu
+  3. hetero
+
+These modes can be used to evaluate four execution configurations:
+
+  1. Single GPU
+  2. Multi GPU
+  3. Optimized heterogeneous CPU+GPU
+  4. GPU-aware optimized heterogeneous CPU+GPU
+
+The optimized heterogeneous and GPU-aware optimized heterogeneous versions both
+use:
+
+  --mode hetero
+
+The difference is the communication path. The normal optimized heterogeneous
+version uses host-staged MPI for GPU-GPU halo exchange. The GPU-aware optimized
+version uses CUDA-aware MPI for GPU-GPU halo exchange and is enabled with:
+
+  --gpu-aware-mpi
+
+
+2. Required system
+------------------
+
+Recommended system:
+
+  - Linux or HPC server
+  - NVIDIA GPU system
+  - CUDA compiler nvcc
+  - MPI compiler mpicxx
+  - OpenMPI or compatible MPI implementation
+  - hwloc library
+  - NVIDIA driver and nvidia-smi
+  - Python 3
+
+For the experiments in this work, the tested GPU architecture was:
+
+  CUDA_ARCH = sm_89
+
+This matches NVIDIA L40S/Ada generation GPUs. If the new system uses a different GPU, update CUDA_ARCH in the Makefile before building.
+
+
+3. Download the repository
+--------------------------
+
+Clone the repository from GitHub:
+
+  git clone YOUR_GITHUB_REPO_URL
+  cd CA-HetroLBM-Algorithm-Git
+
+If the repository has a different folder name after cloning, go into that folder and run all commands from the repository root.
+
+
+4. Check CUDA, MPI, and GPUs
+----------------------------
+
+Check GPUs:
+
+  nvidia-smi
+
+Check CUDA compiler:
+
+  nvcc --version
+
+Check MPI compiler:
+
+  mpicxx --version
+  mpicxx --showme:compile
+  mpicxx --showme:link
+
+Check CPU:
+
+  lscpu
+
+
+5. Set CUDA path if needed
+--------------------------
+
+The Makefile uses:
+
+  CUDA_HOME ?= /usr/local/cuda
+
+If CUDA is installed somewhere else, build with CUDA_HOME:
+
+  make CUDA_HOME=/path/to/cuda
+
+Example:
+
+  make CUDA_HOME=/home/urooj/nvhpc/Linux_x86_64/26.3/cuda/13.1
+
+
+6. Check or update GPU architecture
+-----------------------------------
+
+Open the Makefile and check:
+
+  CUDA_ARCH = sm_89
+
+Examples:
+
+  NVIDIA A100      -> sm_80
+  NVIDIA H100      -> sm_90
+  NVIDIA L40S      -> sm_89
+  NVIDIA RTX 4090  -> sm_89
+
+After changing CUDA_ARCH, rebuild the solver.
+
+
+7. Build the executable
+-----------------------
+
+Default build:
+
+  make clean
+  make
+
+If NVML is not available, build without NVML:
+
+  make clean
+  make USE_NVML=0
+
+The executable is generated in:
+
+  bin/main_plane_couette_3D_CUDA_paramcalc_virtual_nodes_mpi_omp_cuda_1dZsv3.x
+
+
+8. Build for GPU-aware MPI
+--------------------------
+
+GPU-aware optimized heterogeneous runs require a CUDA-aware MPI build and the
+matching mpirun at runtime. On the tested system, this was:
+
+  make clean
+  make MPICXX=/home/urooj/openmpi-cuda/bin/mpicxx
+
+  export PATH=/home/urooj/openmpi-cuda/bin:$PATH
+  export LD_LIBRARY_PATH=/home/urooj/openmpi-cuda/lib:$LD_LIBRARY_PATH
+
+  which mpirun
+
+Expected on the tested system:
+
+  /home/urooj/openmpi-cuda/bin/mpirun
+
+On another system, replace /home/urooj/openmpi-cuda with the local CUDA-aware Open MPI installation path.
+
+You do not need to rebuild for every problem size. Build once, keep the same terminal environment, and run all required sizes.
+
+
+9. Dry run checks
+-----------------
+
+Dry run checks the generated command, GPU selection, and memory estimate without launching the full solver.
+
+Single GPU:
+
+  python3 bin/run_lbm_baseline.py --mode single-gpu --size 100 --dry-run
+
+Multi GPU:
+
+  python3 bin/run_lbm_baseline.py --mode multi-gpu --size 100 --gpus 0,1 --dry-run
+
+Optimized heterogeneous:
+
+  python3 bin/run_lbm_baseline.py --mode hetero --size 100 --gpus 0,1 --cpu-threads 0 --hetero-layout gpu-gpu-cpu --dry-run
+
+GPU-aware optimized heterogeneous:
+
+  python3 bin/run_lbm_baseline.py --mode hetero --size 100 --gpus 0,1 --cpu-threads 0 --hetero-layout gpu-gpu-cpu --gpu-aware-mpi --dry-run
+
+
+10. Normal runs without energy measurement
+------------------------------------------
+
+Single GPU:
+
+  python3 bin/run_lbm_baseline.py --mode single-gpu --size 100 --gpus 0
+  python3 bin/run_lbm_baseline.py --mode single-gpu --size 150 --gpus 0
+  python3 bin/run_lbm_baseline.py --mode single-gpu --size 200 --gpus 0
+  python3 bin/run_lbm_baseline.py --mode single-gpu --size 250 --gpus 0
+
+Multi GPU:
+
+  python3 bin/run_lbm_baseline.py --mode multi-gpu --size 100 --gpus 0,1
+  python3 bin/run_lbm_baseline.py --mode multi-gpu --size 150 --gpus 0,1
+  python3 bin/run_lbm_baseline.py --mode multi-gpu --size 200 --gpus 0,1
+  python3 bin/run_lbm_baseline.py --mode multi-gpu --size 250 --gpus 0,1
+
+Optimized heterogeneous CPU+GPU:
+
+  python3 bin/run_lbm_baseline.py --mode hetero --size 100 --gpus 0,1 --cpu-threads 0 --hetero-layout gpu-gpu-cpu
+  python3 bin/run_lbm_baseline.py --mode hetero --size 150 --gpus 0,1 --cpu-threads 0 --hetero-layout gpu-gpu-cpu
+  python3 bin/run_lbm_baseline.py --mode hetero --size 200 --gpus 0,1 --cpu-threads 0 --hetero-layout gpu-gpu-cpu
+  python3 bin/run_lbm_baseline.py --mode hetero --size 250 --gpus 0,1 --cpu-threads 0 --hetero-layout gpu-gpu-cpu
+
+GPU-aware optimized heterogeneous CPU+GPU:
+
+  python3 bin/run_lbm_baseline.py --mode hetero --size 100 --gpus 0,1 --cpu-threads 0 --hetero-layout gpu-gpu-cpu --gpu-aware-mpi
+  python3 bin/run_lbm_baseline.py --mode hetero --size 150 --gpus 0,1 --cpu-threads 0 --hetero-layout gpu-gpu-cpu --gpu-aware-mpi
+  python3 bin/run_lbm_baseline.py --mode hetero --size 200 --gpus 0,1 --cpu-threads 0 --hetero-layout gpu-gpu-cpu --gpu-aware-mpi
+  python3 bin/run_lbm_baseline.py --mode hetero --size 250 --gpus 0,1 --cpu-threads 0 --hetero-layout gpu-gpu-cpu --gpu-aware-mpi
+
+
+11. Tuned heterogeneous profiles
+--------------------------------
+
+For optimized heterogeneous runs, use:
+
+  --cpu-threads 0
+
+This enables the tuned profile selected for the tested platform:
+
+  100^3 -> GPU0=50,  GPU1=48,  CPU=2 Z planes, CPU threads=8
+  150^3 -> GPU0=75,  GPU1=72,  CPU=3 Z planes, CPU threads=16
+  200^3 -> GPU0=99,  GPU1=97,  CPU=4 Z planes, CPU threads=32
+  250^3 -> GPU0=119, GPU1=126, CPU=5 Z planes, CPU threads=32
+
+These profiles are platform-specific. On another system, CPU speed, GPU speed, memory bandwidth, and GPU interconnect topology may differ, so the CPU Z-plane count and OpenMP thread count may need retuning.
+
+
+12. Energy measurement runs
+---------------------------
+
+Energy measurement is optional and requires the AdceWatt power meter to be installed, connected, and readable from the machine running the solver. Users without the power meter can still run all modes with:
+
+  bin/run_lbm_baseline.py
+
+Before a full energy experiment, check the wattmeter path:
+
+  python3 bin/run_basepower_adcewatt_var_std.py --repetitions 3 --measurement-time 5 --sleep 1
+
+Single GPU energy:
+
+  python3 bin/run_lbm_energy_adcewatt.py --mode single-gpu --sizes 100 --gpus 0 --new-baseline
+  python3 bin/run_lbm_energy_adcewatt.py --mode single-gpu --sizes 150 --gpus 0 --new-baseline
+  python3 bin/run_lbm_energy_adcewatt.py --mode single-gpu --sizes 200 --gpus 0 --new-baseline
+  python3 bin/run_lbm_energy_adcewatt.py --mode single-gpu --sizes 250 --gpus 0 --new-baseline
+
+Multi GPU energy:
+
+  python3 bin/run_lbm_energy_adcewatt.py --mode multi-gpu --sizes 100 --gpus 0,1 --new-baseline
+  python3 bin/run_lbm_energy_adcewatt.py --mode multi-gpu --sizes 150 --gpus 0,1 --new-baseline
+  python3 bin/run_lbm_energy_adcewatt.py --mode multi-gpu --sizes 200 --gpus 0,1 --new-baseline
+  python3 bin/run_lbm_energy_adcewatt.py --mode multi-gpu --sizes 250 --gpus 0,1 --new-baseline
+
+Optimized heterogeneous energy:
+
+  python3 bin/run_lbm_energy_adcewatt.py --mode hetero --sizes 100 --gpus 0,1 --cpu-threads 0 --hetero-layout gpu-gpu-cpu --new-baseline
+  python3 bin/run_lbm_energy_adcewatt.py --mode hetero --sizes 150 --gpus 0,1 --cpu-threads 0 --hetero-layout gpu-gpu-cpu --new-baseline
+  python3 bin/run_lbm_energy_adcewatt.py --mode hetero --sizes 200 --gpus 0,1 --cpu-threads 0 --hetero-layout gpu-gpu-cpu --new-baseline
+  python3 bin/run_lbm_energy_adcewatt.py --mode hetero --sizes 250 --gpus 0,1 --cpu-threads 0 --hetero-layout gpu-gpu-cpu --new-baseline
+
+GPU-aware optimized heterogeneous energy:
+
+  python3 bin/run_lbm_energy_adcewatt.py --mode hetero --sizes 100 --gpus 0,1 --cpu-threads 0 --hetero-layout gpu-gpu-cpu --gpu-aware-mpi --new-baseline
+  python3 bin/run_lbm_energy_adcewatt.py --mode hetero --sizes 150 --gpus 0,1 --cpu-threads 0 --hetero-layout gpu-gpu-cpu --gpu-aware-mpi --new-baseline
+  python3 bin/run_lbm_energy_adcewatt.py --mode hetero --sizes 200 --gpus 0,1 --cpu-threads 0 --hetero-layout gpu-gpu-cpu --gpu-aware-mpi --new-baseline
+  python3 bin/run_lbm_energy_adcewatt.py --mode hetero --sizes 250 --gpus 0,1 --cpu-threads 0 --hetero-layout gpu-gpu-cpu --gpu-aware-mpi --new-baseline
+
+Energy results are saved under:
+
+  bin/energy_results/
+
+
+13. Output folders
+------------------
+
+Normal run output:
+
+  baseline_results/
+
+Energy run output:
+
+  bin/energy_results/
+
+Each normal run stores:
+
+  app_stdout.log
+  app_stderr.log
+  report.json
+
+Each energy run stores:
+
+  lbm_energy_summary.csv
+  energy_summary.json
+  app_stdout.log
+  app_stderr.log
+  raw_power.csv
+
+
+14. Important notes for another system
+--------------------------------------
+
+If the system has only one GPU:
+
+  single-gpu mode can run.
+  multi-gpu and hetero mode need two GPUs in the current version.
+
+If the system has more than two GPUs:
+
+  pass --gpus to select the GPU pair, for example --gpus 0,1.
+
+If the executable fails to build:
+
+  check CUDA_HOME
+  check CUDA_ARCH
+  check mpicxx --showme output
+  check that hwloc and MPI libraries are available
+  try make USE_NVML=0 if NVIDIA NVML linking fails
+
+If the run is slow:
+
+  check nvidia-smi for other GPU processes
+  check CPU load with top or htop
+  use --print-binding to inspect CPU/GPU rank placement
+
+
+15. Current algorithm status
+----------------------------
+
+The Git-ready solver supports:
+
+  single-gpu
+  multi-gpu
+  optimized heterogeneous CPU+GPU
+  GPU-aware optimized heterogeneous CPU+GPU
+
+The optimized heterogeneous version keeps the same numerical output while exchanging only the required 5 Z-direction D3Q19 halo directions for each boundary neighbour. The GPU-aware optimized variant additionally changes the GPU-GPU halo path to direct GPU-buffer MPI exchange when CUDA-aware MPI is available.
+
+
+
